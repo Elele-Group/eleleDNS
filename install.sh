@@ -30,7 +30,7 @@ AGH_UI_PORT="${AGH_PORT:-3001}"
 AGH_HOST=""
 AGH_USER=""
 AGH_PASS=""
-IMAGE="${ELELE_IMAGE:-elele-dns/elele-dns:latest}"
+IMAGE="${ELELE_IMAGE:-hunterelele/elele-dns:latest}"
 
 WITH_ADGUARD="ask"     # ask | yes | no
 ASSUME_YES=0
