@@ -18,7 +18,11 @@
 #
 set -Eeuo pipefail
 
-VERSION="1.0.0"
+# Tracks the application's version rather than counting its own releases. The
+# installer is not a separate product and nobody installs it on purpose: when
+# somebody pastes a version into an issue, the useful answer is which elele. DNS
+# this box is running, not which revision of the shell script fetched it.
+VERSION="0.2.0"
 
 # ---------------------------------------------------------------------------
 # Defaults, all overridable
@@ -32,10 +36,15 @@ AGH_USER=""
 AGH_PASS=""
 IMAGE="${ELELE_IMAGE:-hunterelele/elele-dns:latest}"
 
+# Where to fetch this script from when it needs to leave a copy of itself behind
+# and cannot find one on disk, which is every `curl | bash` run.
+SELF_URL="${ELELE_INSTALLER_URL:-https://dns.elele.dev/install.sh}"
+
 WITH_ADGUARD="ask"     # ask | yes | no
 ASSUME_YES=0
 DRY_RUN=0
 DO_UNINSTALL=0
+DO_UPDATE=0
 LOG_FILE="${TMPDIR:-/tmp}/elele-install-$(date +%Y%m%d-%H%M%S).log"
 
 # ---------------------------------------------------------------------------
@@ -164,8 +173,10 @@ usage() {
     --image REF           Container image               (default: ${IMAGE})
     -y, --yes             Take every default, ask nothing
     --dry-run             Print what would happen, change nothing
+    --update              Pull the newest image and restart, nothing else
     --uninstall           Stop and remove the dashboard (keeps your data)
     -h, --help            This
+    -V, --version         Print the version and exit
 
   ${BOLD}Examples${RESET}
     ${GREY}# the whole thing, on a fresh Raspberry Pi${RESET}
@@ -173,6 +184,15 @@ usage() {
 
     ${GREY}# dashboard only, pointed at the resolver you already run${RESET}
     sudo ./install.sh --dashboard-only --agh-url http://192.168.1.10:3000
+
+    ${GREY}# later, to move to the newest release${RESET}
+    sudo ./install.sh --update
+
+  ${BOLD}Reading it first${RESET}
+    ${GREY}# if you would rather not pipe a URL into a root shell${RESET}
+    curl -fsSL https://dns.elele.dev/install.sh -o install.sh
+    less install.sh
+    chmod +x install.sh && sudo ./install.sh
 
 EOF
 }
@@ -190,8 +210,10 @@ while [[ $# -gt 0 ]]; do
     --image)          IMAGE="${2:?}"; shift 2 ;;
     -y|--yes)         ASSUME_YES=1; shift ;;
     --dry-run)        DRY_RUN=1; shift ;;
+    --update|--upgrade) DO_UPDATE=1; shift ;;
     --uninstall)      DO_UNINSTALL=1; shift ;;
     -h|--help)        usage; exit 0 ;;
+    -V|--version)     printf 'elele. DNS installer %s\n' "$VERSION"; exit 0 ;;
     *)                die "unknown option: $1 (try --help)" ;;
   esac
 done
@@ -222,11 +244,123 @@ lan_address() {
   printf '%s' "${ip:-127.0.0.1}"
 }
 
-compose() {
-  if docker compose version >/dev/null 2>&1; then docker compose "$@"
-  else docker-compose "$@"
+# Resolved once into a real command, deliberately not a shell function.
+#
+# This used to be `compose() { docker compose "$@"; }`, called as
+# `as_root "${COMPOSE[@]}" pull`. For anyone not already root that expands to
+# `sudo compose pull`, and sudo does not know about shell functions: it searches
+# PATH and, on Debian and Ubuntu, finds /usr/bin/compose from the `mailcap`
+# package. The install then failed with
+#
+#   Warning: unknown mime-type for "pull" -- using "application/octet-stream"
+#   Error: no "compose" mailcap rules found for type "application/octet-stream"
+#
+# which names neither Docker nor this script, and sends the reader looking for a
+# problem with their MIME configuration.
+#
+# An array holds a real binary and its subcommand, so it survives sudo intact.
+COMPOSE=()
+
+resolve_compose() {
+  # Written as an if rather than `(( ... )) && return 0`. Under `set -e` an
+  # arithmetic expression evaluating to zero is a failing command, and relying on
+  # where it sits in a && list to stay non-fatal is the kind of subtlety that
+  # breaks the moment somebody edits the line.
+  if (( ${#COMPOSE[@]} )); then return 0; fi
+  if as_root docker compose version >/dev/null 2>&1; then
+    COMPOSE=(docker compose)
+  elif as_root docker-compose version >/dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+  else
+    die "no Docker Compose found (tried 'docker compose' and 'docker-compose')"
   fi
 }
+
+# ---------------------------------------------------------------------------
+# Update
+# ---------------------------------------------------------------------------
+#
+# This script stays on the box after it has done its job, so the cheapest place
+# to put "get the newest one" is the thing already sitting in the install
+# directory. The alternative is asking somebody to remember two compose
+# subcommands and which directory to run them in, months after the one evening
+# they thought about any of this.
+#
+# It does not touch the resolver, the configuration or the database. Updating a
+# dashboard should be the least interesting thing that happens all week.
+
+if (( DO_UPDATE )); then
+  banner
+  say "  ${BOLD}Updating the dashboard${RESET}"
+  rule
+
+  [[ -f "$INSTALL_DIR/docker-compose.yml" ]] \
+    || die "nothing installed at $INSTALL_DIR (use --dir if it lives elsewhere)"
+
+  have docker || die "docker is not installed"
+
+  # The tag is a moving target, so identity comes from the image ID. Comparing
+  # the tag against itself would report success without proving anything moved.
+  before="$(as_root docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo none)"
+  info "currently running ${before#sha256:}"
+
+  # After the dry-run exit, because resolving it shells out to Docker and a
+  # dry run is supposed to be inspectable on a box where that might not answer.
+  if (( DRY_RUN )); then
+    printf '  %s· would run:%s docker compose pull && docker compose up -d in %s\n' "$DIM" "$RESET" "$INSTALL_DIR"
+    say ""
+    exit 0
+  fi
+
+  resolve_compose
+
+  (cd "$INSTALL_DIR" && as_root "${COMPOSE[@]}" pull >>"$LOG_FILE" 2>&1) &
+  spin $! "pulling ${IMAGE}"
+  ok "pulled"
+
+  after="$(as_root docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || echo none)"
+
+  if [[ "$before" == "$after" ]]; then
+    say ""
+    say "  ${GREEN}Already current.${RESET} ${GREY}Nothing to restart.${RESET}"
+    say ""
+    say "  ${GREY}Pinned to a version tag rather than :latest? Then this only ever${RESET}"
+    say "  ${GREY}moves when you edit the tag in ${INSTALL_DIR}/docker-compose.yml.${RESET}"
+    say ""
+    exit 0
+  fi
+
+  (cd "$INSTALL_DIR" && as_root "${COMPOSE[@]}" up -d >>"$LOG_FILE" 2>&1) &
+  spin $! "restarting"
+  ok "restarted"
+
+  # Same health gate the install path uses. An update that returns you to a
+  # prompt before the container is answering has told you nothing.
+  say ""
+  UPDATED_HEALTHY=0
+  for _ in $(seq 1 40); do
+    if curl -fsS --max-time 3 "http://127.0.0.1:${DASH_PORT}/api/health" >/dev/null 2>&1; then
+      UPDATED_HEALTHY=1
+      break
+    fi
+    sleep 2
+  done
+
+  if (( UPDATED_HEALTHY )); then
+    ok "healthy"
+  else
+    warn "updated, but /api/health has not answered in 80s"
+    info "check it with: cd $INSTALL_DIR && sudo docker compose logs -f"
+  fi
+
+  say ""
+  say "  ${GREY}was${RESET}  ${DIM}${before#sha256:}${RESET}"
+  say "  ${GREY}now${RESET}  ${BOLD}${after#sha256:}${RESET}"
+  say ""
+  say "  ${GREY}Your history and configuration were not touched.${RESET}"
+  say ""
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Uninstall
@@ -238,7 +372,8 @@ if (( DO_UNINSTALL )); then
   rule
   if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
     info "stopping containers"
-    (cd "$INSTALL_DIR" && as_root compose down) >>"$LOG_FILE" 2>&1 || true
+    resolve_compose
+    (cd "$INSTALL_DIR" && as_root "${COMPOSE[@]}" down) >>"$LOG_FILE" 2>&1 || true
     ok "stopped"
   else
     warn "nothing installed at $INSTALL_DIR"
@@ -469,6 +604,11 @@ step "Writing the configuration"
 
 run as_root mkdir -p "$INSTALL_DIR/data"
 
+# The container runs as uid 1001, not as root. The image chowns /data when it is
+# built, but a bind mount covers that over with a directory root has just made,
+# and SQLite cannot create a database in a directory it cannot write to.
+run as_root chown -R 1001:1001 "$INSTALL_DIR/data"
+
 ENV_FILE="$INSTALL_DIR/.env"
 COMPOSE_FILE="$INSTALL_DIR/docker-compose.yml"
 
@@ -483,6 +623,7 @@ else
 #
 # The dashboard reads AdGuard Home's query log through its admin API, so it
 # needs the same credentials you use to log in. They never leave this machine.
+DNS_PROVIDER=adguard
 ADGUARD_URL=${AGH_HOST}
 ADGUARD_USERNAME=${AGH_USER}
 ADGUARD_PASSWORD=${AGH_PASS}
@@ -519,13 +660,10 @@ services:
       # Bind-mounted rather than a named volume so the history is somewhere you
       # can find, copy and back up without knowing Docker's storage layout.
       - ./data:/data
-    healthcheck:
-      # Runs inside the container, so it uses the container's port, not yours.
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 40s
+    # No healthcheck here on purpose: the image declares its own, against
+    # /api/health with node's own fetch. Overriding it with a shell tool is how
+    # you end up permanently unhealthy, since the image ships neither wget nor
+    # curl.
 EOF
   ok "wrote docker-compose.yml"
 fi
@@ -543,9 +681,10 @@ step "Starting the dashboard"
 if (( DRY_RUN )); then
   info "would run: docker compose up -d"
 else
-  (cd "$INSTALL_DIR" && as_root compose pull >>"$LOG_FILE" 2>&1) &
+  resolve_compose
+  (cd "$INSTALL_DIR" && as_root "${COMPOSE[@]}" pull >>"$LOG_FILE" 2>&1) &
   spin $! "pulling ${IMAGE}"
-  (cd "$INSTALL_DIR" && as_root compose up -d >>"$LOG_FILE" 2>&1) &
+  (cd "$INSTALL_DIR" && as_root "${COMPOSE[@]}" up -d >>"$LOG_FILE" 2>&1) &
   spin $! "starting"
   ok "container is up"
 fi
@@ -588,6 +727,39 @@ fi
 # Done
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Leave a copy of this script behind
+# ---------------------------------------------------------------------------
+#
+# `curl | sudo bash` leaves nothing on disk. The script was a stream that bash
+# has already consumed, $0 is "bash", and there is no file to run a second time.
+# So `--update`, and the line printed below telling somebody to use it, would
+# both name a path that does not exist.
+#
+# Persist it now: copy the local file when this was run as one, and re-fetch from
+# the same URL when it was piped. Failure here is not fatal. It costs the
+# convenience of an update command, not the install that just succeeded.
+
+SELF_DEST="$INSTALL_DIR/install.sh"
+SELF_SAVED=0
+
+if (( DRY_RUN )); then
+  info "would leave a copy of this script at $SELF_DEST"
+else
+  if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+    as_root cp "${BASH_SOURCE[0]}" "$SELF_DEST" >>"$LOG_FILE" 2>&1 && SELF_SAVED=1
+  elif have curl; then
+    as_root curl -fsSL --max-time 20 "$SELF_URL" -o "$SELF_DEST" >>"$LOG_FILE" 2>&1 && SELF_SAVED=1
+  fi
+
+  if (( SELF_SAVED )); then
+    as_root chmod +x "$SELF_DEST" >>"$LOG_FILE" 2>&1 || true
+    log "SELF saved to $SELF_DEST"
+  else
+    log "SELF could not be saved to $SELF_DEST"
+  fi
+fi
+
 LAN="$(lan_address)"
 
 printf '\n'
@@ -600,6 +772,18 @@ printf '\n'
 printf '  %sConfig%s           %s\n' "$GREY" "$RESET" "$INSTALL_DIR"
 printf '  %sHistory%s          %s/data/queries.db\n' "$GREY" "$RESET" "$INSTALL_DIR"
 printf '  %sLog%s              %s\n' "$GREY" "$RESET" "$LOG_FILE"
+printf '  %sVersion%s          %s\n' "$GREY" "$RESET" "$VERSION"
+printf '\n'
+# Said here because the moment somebody needs it is months from now, and this
+# screen is the one they screenshot. Only promises the saved copy when there
+# actually is one; otherwise it gives the two compose commands, which always work.
+if (( SELF_SAVED )); then
+  printf '  %sLater, to move to the newest release:%s\n' "$GREY" "$RESET"
+  printf '  %s    sudo %s --update%s\n' "$DIM" "$SELF_DEST" "$RESET"
+else
+  printf '  %sLater, to move to the newest release:%s\n' "$GREY" "$RESET"
+  printf '  %s    cd %s && sudo docker compose pull && sudo docker compose up -d%s\n' "$DIM" "$INSTALL_DIR" "$RESET"
+fi
 printf '\n'
 rule
 printf '\n'
