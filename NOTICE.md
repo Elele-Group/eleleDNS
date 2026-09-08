@@ -74,3 +74,9 @@ as part of an application.
 Next.js, React, Tailwind CSS, Drizzle ORM, Recharts, d3-geo, topojson-client,
 Motion, Zod, lucide-react, simple-icons and better-sqlite3, under their own
 licences (MIT, Apache-2.0 and ISC). `npm ls --all` enumerates the full tree.
+
+## Privacy and local processing
+
+The full elele. DNS product is locally hosted. DNS activity remains on the server or device selected by the installation operator; Elele Group does not receive, host, sell, or use that query data. The operator controls the purpose, access and retention for their deployment and must provide deployment-specific privacy information where required.
+
+The public demo contains generated fixture data only. No household browsing history is published. Elele Group is registered with the UK Information Commissioner's Office, reference ZC231017. For privacy enquiries about the software, contact legal@elele.group. See https://ico.org.uk/make-a-complaint/ for ICO complaint information.

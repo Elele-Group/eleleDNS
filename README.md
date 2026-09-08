@@ -60,6 +60,13 @@ destinations map, which needs answer addresses that Pi-hole's API does not repor
 | **Is a device bypassing me** | not answered | DoH resolver lookups and the Firefox canary, stated as intent rather than proof |
 | **Which upstream is slow** | not answered | latency distribution per resolver, p50, p95 and the spread |
 
+
+The flagship **Destinations** surface turns that last answer into a network atlas: a panoramic live map,
+country-share ribbon, company ranking and autonomous-system breakdown. Historical shading is kept
+separate from the replayed live stream, so the page shows both where the selected range went and what
+is arriving now. Read the full guide in the demo&rsquo;s [Destinations atlas wiki article][atlas].
+
+[atlas]: https://dns.elele.dev/wiki/destinations-atlas/
 Fairness, because it matters: AdGuard Home is not the competition. It is the thing answering DNS,
 it has the filtering engine and a decade of edge cases nobody wants to reimplement, and it is the
 only one of the two that keeps working when the other is switched off.
@@ -207,7 +214,7 @@ The deploy build runs three stages, in this order:
 
 | Stage | |
 |---|---|
-| **generate** | 418k queries → real rollups → prune to 7 days of detail |
+| **generate** | 418k queries â†’ real rollups â†’ prune to 7 days of detail |
 | **snapshot** | extract the client-side JSON (stream, search, explorer) |
 | **build** | prerender 411 pages against the fixture, emit `out/` |
 
@@ -237,8 +244,8 @@ the anomaly detectors, the friction analysis. If something looks wrong here, it 
 
 ## Stack
 
-Next.js 15 App Router · React 19 · TypeScript strict · Tailwind v4 with a token layer solved in
-OKLCH · SQLite via better-sqlite3 with WAL, tuned for an SD card · Drizzle · Recharts and d3-geo ·
+Next.js 15 App Router Â· React 19 Â· TypeScript strict Â· Tailwind v4 with a token layer solved in
+OKLCH Â· SQLite via better-sqlite3 with WAL, tuned for an SD card Â· Drizzle Â· Recharts and d3-geo Â·
 Motion. Contrast is a build check, not a comment: `npm run verify:contrast` solves every text role
 against every ground it can land on and fails rather than warns.
 
@@ -248,3 +255,12 @@ against every ground it can land on and fails rather than warns.
 <sub>Not affiliated with AdGuard Software Limited. AdGuard Home is their trademark, used here to
 identify the software this interoperates with.</sub>
 </div>
+
+
+## Privacy and local data processing
+
+The installed elele. DNS product processes DNS activity on the server or device chosen by its operator. Elele Group does not receive, host, sell, or use a locally hosted installation's query history. The operator of an installation decides why and how that data is processed and is responsible for its lawful basis, access controls, retention, and any privacy information owed to affected people.
+
+The public demo is different: every device, domain, query, timestamp and location shown there is generated fixture data. No household browsing history is published.
+
+Elele Group is registered with the UK Information Commissioner's Office, reference ZC231017. For privacy enquiries about the software, contact legal@elele.group. Product privacy information is available in the installed dashboard. The ICO explains the right to be informed and accepts complaints at https://ico.org.uk/make-a-complaint/.
