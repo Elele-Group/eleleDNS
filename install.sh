@@ -764,7 +764,7 @@ fi
 # local bin directory. This keeps the first-run installer and the package
 # manager builds on the same command surface.
 CLI_DEST="${ELELE_CLI_DEST:-/usr/local/bin/elele-dns}"
-CLI_URL="${ELELE_CLI_URL:-https://raw.githubusercontent.com/Elele-Group/elele-dns-demo/master/bin/elele-dns}"
+CLI_URL="${ELELE_CLI_URL:-https://raw.githubusercontent.com/Elele-Group/eleleDNS/master/bin/elele-dns}"
 CLI_SAVED=0
 
 if (( DRY_RUN )); then

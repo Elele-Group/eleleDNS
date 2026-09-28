@@ -1,7 +1,7 @@
 class EleleDns < Formula
   desc "Animated command-line control for the elele. DNS Docker dashboard"
   homepage "https://dns.elele.dev"
-  url "https://github.com/Elele-Group/elele-dns-demo/archive/refs/heads/master.tar.gz"
+  url "https://github.com/Elele-Group/eleleDNS/archive/refs/heads/master.tar.gz"
   version "0.2.0"
   license "All rights reserved"
 
