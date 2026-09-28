@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>elele-dns</id>
+    <version>0.2.0</version>
+    <title>elele. DNS CLI</title>
+    <authors>Elele Group</authors>
+    <owners>Elele Group</owners>
+    <licenseUrl>https://dns.elele.dev</licenseUrl>
+    <projectUrl>https://dns.elele.dev</projectUrl>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <description>Animated PowerShell command-line control for the elele. DNS Docker dashboard.</description>
+    <tags>dns adguard pihole docker self-hosted cli</tags>
+  </metadata>
+  <files>
+    <file src="..\..\bin\elele-dns.ps1" target="tools" />
+  </files>
+</package>

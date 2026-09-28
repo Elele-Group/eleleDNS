@@ -60,32 +60,59 @@ destinations map, which needs answer addresses that Pi-hole's API does not repor
 | **Why did that site break** | scroll and hope | a moment view: every lookup either side of an instant, retries marked |
 | **Is a device bypassing me** | not answered | DoH resolver lookups and the Firefox canary, stated as intent rather than proof |
 | **Which upstream is slow** | not answered | latency distribution per resolver, p50, p95 and the spread |
+| **Did my configured upstreams actually carry traffic** | not answered | routing diagnostics compare configured upstreams with those observed in real queries |
 
 
 The flagship **Destinations** surface turns that last answer into a network atlas: a panoramic live map,
 country-share ribbon, company ranking and autonomous-system breakdown. Historical shading is kept
 separate from the replayed live stream, so the page shows both where the selected range went and what
-is arriving now. Read the full guide in the demo&rsquo;s [Destinations atlas wiki article][atlas].
+is arriving now. Explore it directly in the live [Destinations atlas][atlas].
 
-[atlas]: https://dns.elele.dev/wiki/destinations-atlas/
+[atlas]: https://dns.elele.dev/destinations/
 Fairness, because it matters: AdGuard Home is not the competition. It is the thing answering DNS,
 it has the filtering engine and a decade of edge cases nobody wants to reimplement, and it is the
 only one of the two that keeps working when the other is switched off.
 
 <br>
 
-## Install
+## Install and operate it from the terminal
 
-One script. It installs AdGuard Home too if you do not already run one, wires the two together, and
-hands back two URLs.
+One script. It installs AdGuard Home too if you do not already run one, wires the two together,
+installs the resident `elele-dns` command, and hands back two URLs.
 
 ```bash
 curl -fsSL https://dns.elele.dev/install.sh | sudo bash
 ```
 
 Piping a URL into a root shell deserves a second's hesitation every time, so
-[read it first](install.sh). It is 610 lines, and every section of it says what it is about to do
-before it does it.
+[read it first](install.sh). Every section says what it is about to do before it
+does it.
+
+The installer leaves a real command in the system path. Run it with no arguments
+for the animated console, or call a command directly:
+
+```bash
+elele-dns                 # interactive terminal console
+elele-dns status          # container state and dashboard health
+elele-dns doctor          # Docker, Compose, project, and endpoint checks
+elele-dns logs            # follow service output
+elele-dns restart         # recreate the dashboard service
+elele-dns update          # pull the current image and restart
+elele-dns config          # show the active project and configuration paths
+```
+
+`elele-dns doctor` is the first place to start when the dashboard is not
+answering. It separates a missing Compose project, a stopped Docker engine, a
+container problem, and an unreachable health endpoint.
+
+The repository also carries Homebrew and Chocolatey package recipes. They are
+ready for registry publication but are not advertised as published packages
+until those registry releases exist:
+
+- `packaging/homebrew/elele-dns.rb`
+- `packaging/chocolatey/elele-dns.nuspec`
+- `bin/elele-dns` for Unix systems
+- `bin/elele-dns.ps1` for Windows
 
 <details>
 <summary><b>What it actually does</b></summary>
@@ -100,7 +127,8 @@ before it does it.
 | **4** | Authenticates against `/control/status` **before** writing anything, so a wrong password fails in a script that can tell you rather than in a container that restarts forever. |
 | **5** | Writes `.env` at `chmod 600` (it holds your admin password) and a compose file with the history bind-mounted somewhere you can back up. |
 | **6** | Starts it, polls `/api/health` until it answers, then reports how many queries were ingested. |
-| **7** | Tells you the one thing left: point your router's DNS at the box. |
+| **7** | Installs the `elele-dns` terminal command into `/usr/local/bin`. |
+| **8** | Tells you the one thing left: point your router's DNS at the box. |
 
 </details>
 
@@ -173,9 +201,9 @@ installer does this for you; doing it by hand, do it once up front:
 mkdir -p data && sudo chown -R 1001:1001 data
 ```
 
-Then `sudo docker compose up -d`. The full walkthrough, including Pi-hole and
-every environment variable, is in the demo's
-[wiki](https://dns.elele.dev/wiki/manual-install/).
+Then run `sudo docker compose up -d`. To manage a hand-written Compose project
+with the CLI, set `ELELE_DIR` to that project directory before running
+`elele-dns status` or another command.
 
 </details>
 
@@ -215,9 +243,9 @@ shell-based healthcheck leaves the container permanently unhealthy.
 <br>
 
 > [!WARNING]
-> There is no login. Anyone who can reach the address can read every DNS query the household has
-> made. On a trusted LAN that is a reasonable trade for zero setup; on anything reachable from the
-> internet it is not a trade, it is a leak. Put it behind a VPN or an authenticating proxy.
+> Authentication is optional and disabled by default. Until you configure a local password, OIDC,
+> or SAML under Control > Identity, anyone who can reach the address can read the household's DNS
+> history and use the Control screens. Keep it on the LAN or behind a VPN until login is enabled.
 
 <br>
 

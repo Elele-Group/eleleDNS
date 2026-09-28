@@ -8,7 +8,7 @@
 #   The reason this exists rather than a README with twelve steps: every one of
 #   those steps is a place to get it subtly wrong, and the failure mode of
 #   getting DNS subtly wrong is a household that cannot load anything while
-#   somebody reads a wiki page on a phone that also cannot load anything.
+#   somebody searches the documentation on a phone that also cannot load anything.
 #
 #   Usage:
 #     curl -fsSL https://dns.elele.dev/install.sh | sudo bash
@@ -760,6 +760,28 @@ else
   fi
 fi
 
+# Install the resident terminal command when the target supports a standard
+# local bin directory. This keeps the first-run installer and the package
+# manager builds on the same command surface.
+CLI_DEST="${ELELE_CLI_DEST:-/usr/local/bin/elele-dns}"
+CLI_URL="${ELELE_CLI_URL:-https://raw.githubusercontent.com/Elele-Group/elele-dns-demo/master/bin/elele-dns}"
+CLI_SAVED=0
+
+if (( DRY_RUN )); then
+  info "would install the elele-dns command at $CLI_DEST"
+elif have curl; then
+  CLI_TMP="${TMPDIR:-/tmp}/elele-dns-cli.$$"
+  if [[ -f "$(dirname "${BASH_SOURCE[0]:-}")/../bin/elele-dns" ]]; then
+    cp "$(dirname "${BASH_SOURCE[0]}")/../bin/elele-dns" "$CLI_TMP"
+  else
+    curl -fsSL --max-time 20 "$CLI_URL" -o "$CLI_TMP" >>"$LOG_FILE" 2>&1 || true
+  fi
+  if [[ -s "$CLI_TMP" ]]; then
+    as_root install -m 0755 "$CLI_TMP" "$CLI_DEST" >>"$LOG_FILE" 2>&1 && CLI_SAVED=1
+    rm -f "$CLI_TMP"
+  fi
+fi
+
 LAN="$(lan_address)"
 
 printf '\n'
@@ -773,6 +795,9 @@ printf '  %sConfig%s           %s\n' "$GREY" "$RESET" "$INSTALL_DIR"
 printf '  %sHistory%s          %s/data/queries.db\n' "$GREY" "$RESET" "$INSTALL_DIR"
 printf '  %sLog%s              %s\n' "$GREY" "$RESET" "$LOG_FILE"
 printf '  %sVersion%s          %s\n' "$GREY" "$RESET" "$VERSION"
+if (( CLI_SAVED )); then
+  printf '  %sCLI%s              %selele-dns status%s\n' "$GREY" "$RESET" "$DIM" "$RESET"
+fi
 printf '\n'
 # Said here because the moment somebody needs it is months from now, and this
 # screen is the one they screenshot. Only promises the saved copy when there
@@ -790,7 +815,8 @@ printf '\n'
 printf '  %sOne more thing, and it is the one that matters:%s\n\n' "$BOLD" "$RESET"
 printf '  %sPoint your router'"'"'s DNS at %s%s%s, or nothing on the network%s\n' "$GREY" "$BOLD" "$LAN" "$RESET$GREY" "$RESET"
 printf '  %sis actually being filtered and both of these screens stay empty.%s\n\n' "$GREY" "$RESET"
-printf '  %sThe dashboard has no login. It can read every DNS query this%s\n' "$AMBER" "$RESET"
-printf '  %shousehold makes. Keep it on the LAN.%s\n\n' "$AMBER" "$RESET"
+printf '  %sAuthentication starts disabled. The dashboard can read every DNS%s\n' "$AMBER" "$RESET"
+printf '  %squery this household makes. Keep it on the LAN until you configure%s\n' "$AMBER" "$RESET"
+printf '  %sa local password or SSO under Control > Identity.%s\n\n' "$AMBER" "$RESET"
 
 log "DONE"

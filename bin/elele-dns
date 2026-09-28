@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+VERSION="0.2.0"
+INSTALL_DIR="${ELELE_DIR:-/opt/elele-dns}"
+PORT="${ELELE_PORT:-3000}"
+NO_COLOR_FLAG=0
+
+if [[ -t 1 && "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR:-}" ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+  CYAN=$'\033[38;5;81m'; GREEN=$'\033[38;5;114m'; AMBER=$'\033[38;5;214m'; RED=$'\033[38;5;203m'; GREY=$'\033[38;5;245m'
+else
+  BOLD=""; DIM=""; RESET=""; CYAN=""; GREEN=""; AMBER=""; RED=""; GREY=""
+fi
+
+say() { printf '%s\n' "$*"; }
+ok() { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$*"; }
+warn() { printf '  %s!%s %s\n' "$AMBER" "$RESET" "$*"; }
+fail() { printf '  %s✗%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
+rule() { printf '%s────────────────────────────────────────────────────────────%s\n' "$GREY" "$RESET"; }
+
+banner() {
+  printf '\n  %s%sELELE%s%s.%s%s DNS%s\n' "$BOLD" "$CYAN" "$RESET" "$CYAN" "$RESET" "$DIM" "$RESET"
+  printf '  %sprivate resolver control, from your terminal%s\n' "$GREY" "$RESET"
+  printf '  %sv%s%s\n\n' "$DIM" "$VERSION" "$RESET"
+}
+
+compose=()
+resolve_compose() {
+  [[ -f "$INSTALL_DIR/docker-compose.yml" ]] || fail "No Docker project found at $INSTALL_DIR. Set ELELE_DIR or run the installer first."
+  if docker compose version >/dev/null 2>&1; then compose=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then compose=(docker-compose)
+  else fail "Docker Compose is not installed."; fi
+}
+
+docker_run() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then docker "$@"
+  elif docker "$@" >/dev/null 2>&1; then docker "$@"
+  elif command -v sudo >/dev/null 2>&1; then sudo docker "$@"
+  else fail "Docker needs permission. Add your user to the docker group or install sudo."; fi
+}
+
+compose_run() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then (cd "$INSTALL_DIR" && "${compose[@]}" "$@")
+  elif (cd "$INSTALL_DIR" && "${compose[@]}" "$@") >/dev/null 2>&1; then (cd "$INSTALL_DIR" && "${compose[@]}" "$@")
+  elif command -v sudo >/dev/null 2>&1; then (cd "$INSTALL_DIR" && sudo "${compose[@]}" "$@")
+  else fail "Docker needs permission. Add your user to the docker group or install sudo."; fi
+}
+
+spinner() {
+  local pid="$1" label="$2" frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' index=0
+  if [[ ! -t 1 ]]; then wait "$pid"; return $?; fi
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r  %s%s%s %s' "$CYAN" "${frames:index:1}" "$RESET" "$label"
+    index=$(( (index + 1) % ${#frames} ))
+    sleep 0.08
+  done
+  printf '\r\033[K'
+  wait "$pid"
+}
+
+animated() {
+  local label="$1"; shift
+  ("$@") >/tmp/elele-dns-cli.$$.log 2>&1 &
+  local pid=$!
+  if spinner "$pid" "$label"; then ok "$label"; else cat /tmp/elele-dns-cli.$$.log >&2; rm -f /tmp/elele-dns-cli.$$.log; fail "$label failed"; fi
+  rm -f /tmp/elele-dns-cli.$$.log
+}
+
+health_url="http://127.0.0.1:${PORT}/api/health"
+
+status() {
+  resolve_compose
+  rule
+  say "  ${BOLD}ELELE DNS STATUS${RESET}"
+  rule
+  compose_run ps
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then ok "dashboard healthy at $health_url"; else warn "dashboard is not answering at $health_url"; fi
+}
+
+logs() { resolve_compose; compose_run logs -f --tail="${1:-120}"; }
+start() { resolve_compose; animated "starting dashboard" compose_run up -d; status; }
+stop() { resolve_compose; animated "stopping dashboard" compose_run down; }
+restart() { resolve_compose; animated "restarting dashboard" compose_run up -d --force-recreate; status; }
+update() { resolve_compose; animated "pulling latest image" compose_run pull; restart; }
+doctor() {
+  rule; say "  ${BOLD}ELELE DNS DOCTOR${RESET}"; rule
+  command -v docker >/dev/null 2>&1 && ok "docker command found" || warn "docker command missing"
+  docker info >/dev/null 2>&1 && ok "docker engine reachable" || warn "docker engine is not reachable"
+  resolve_compose
+  ok "compose project found at $INSTALL_DIR"
+  if command -v curl >/dev/null 2>&1 && curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then ok "health endpoint answered"; else warn "health endpoint did not answer"; fi
+}
+config() { resolve_compose; say "  project: $INSTALL_DIR"; say "  compose: $INSTALL_DIR/docker-compose.yml"; say "  env:     $INSTALL_DIR/.env"; say "  url:     $health_url"; }
+
+menu() {
+  banner
+  if [[ ! -t 0 ]]; then status; return; fi
+  while true; do
+    printf '\n  %s%s1%s  status     %s2%s  start      %s3%s  restart\n' "$CYAN" "$BOLD" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
+    printf '  %s%s4%s  logs       %s5%s  update     %s6%s  doctor\n' "$CYAN" "$BOLD" "$RESET" "$CYAN" "$RESET" "$CYAN" "$RESET"
+    printf '  %s%sq%s  quit\n\n' "$CYAN" "$BOLD" "$RESET"
+    read -r -p "  ${GREY}choose a command${RESET} ${DIM}>${RESET} " choice
+    case "${choice,,}" in 1) status ;; 2) start ;; 3) restart ;; 4) logs ;; 5) update ;; 6) doctor ;; q|quit) return ;; *) warn "choose 1 through 6" ;; esac
+  done
+}
+
+usage() {
+  cat <<EOF
+elele-dns v${VERSION}
+
+Usage: elele-dns [command] [options]
+
+Commands:
+  status       show containers and dashboard health
+  start        start the Docker project
+  stop         stop the Docker project
+  restart      recreate the dashboard container
+  logs         follow recent container logs
+  update       pull the latest image and recreate the container
+  doctor       check Docker, Compose, project paths, and health
+  config       show the active project paths
+  menu         open the animated interactive console
+  version      print the CLI version
+
+Options:
+  --dir PATH   use a different Docker project directory
+  --port PORT  check a different dashboard port
+  --plain      disable color and animation
+  --help       show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) INSTALL_DIR="${2:?missing path after --dir}"; shift 2 ;;
+    --port) PORT="${2:?missing port after --port}"; health_url="http://127.0.0.1:${PORT}/api/health"; shift 2 ;;
+    --plain) NO_COLOR_FLAG=1; NO_COLOR=1; BOLD=""; DIM=""; RESET=""; CYAN=""; GREEN=""; AMBER=""; RED=""; GREY=""; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -V|--version|version) printf '%s\n' "$VERSION"; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+command="${1:-menu}"
+shift || true
+case "$command" in
+  status) banner; status ;;
+  start|up) banner; start ;;
+  stop|down) banner; stop ;;
+  restart) banner; restart ;;
+  logs) banner; logs "${1:-120}" ;;
+  update|upgrade) banner; update ;;
+  doctor) banner; doctor ;;
+  config) banner; config ;;
+  menu) menu ;;
+  help) usage ;;
+  *) usage; exit 2 ;;
+esac
